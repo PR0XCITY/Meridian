@@ -42,11 +42,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Meridian", version="0.1.0", lifespan=lifespan)
 
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+allowed_origins = [o.strip() for o in allowed_origins if o.strip()]
+
+# Always allow these origins
+default_origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://meridian-pr0xcitys-projects.vercel.app",
+    "https://meridian-git-main-pr0xcitys-projects.vercel.app",
+]
+# Merge, avoiding duplicates
+allowed_origins = list(set(default_origins + allowed_origins))
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
