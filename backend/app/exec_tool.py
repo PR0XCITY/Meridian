@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from app.docker_runner import run_code_in_sandbox
+from app.sandbox.docker_runner import run_code_in_sandbox
 
 
-def execute_code(code: str) -> dict:
+def execute_code(code: str, language: str = "python") -> dict:
     """Execute code in the sandbox and return a structured result.
 
     Args:
-        code: Python source code string.
+        code: Source code string.
+        language: Programming language to use.
 
     Returns:
         dict with keys:
@@ -26,7 +27,27 @@ def execute_code(code: str) -> dict:
             "error": "Empty code string",
         }
 
-    result = run_code_in_sandbox(code)
+    result = run_code_in_sandbox(code, language=language)
+
+    if result.get("error") == "docker_not_available":
+        from app.sandbox.subprocess_runner import run_code_subprocess
+        result = run_code_subprocess(code, language=language)
+
+    if result.get("error") == "timeout":
+        return {
+            "output": "ERROR: Execution timed out (30s limit exceeded)",
+            "success": False,
+            "exit_code": -1,
+            "error": "timeout",
+        }
+
+    if result.get("error") == "compilation_failed":
+        return {
+            "output": f"COMPILATION ERROR:\n{result['stderr']}",
+            "success": False,
+            "exit_code": result.get("exit_code", -1),
+            "error": "compilation_failed",
+        }
 
     # Combine output for agent consumption
     parts = []

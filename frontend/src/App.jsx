@@ -54,72 +54,74 @@ function StepCard({ step, isLast }) {
       </div>
 
       <div className="step-body">
-        <div className="step-label" style={{ color: cfg.color }}>
-          {cfg.label}
-          {step.iteration != null && (
-            <span className="step-iter">#{step.iteration}</span>
+        <div className="step-card-content" style={{ '--card-accent': cfg.color }}>
+          <div className="step-label" style={{ color: cfg.color }}>
+            {cfg.label}
+            {step.iteration != null && (
+              <span className="step-iter">#{step.iteration}</span>
+            )}
+            {isActive && (
+              <span className="thinking-dots">
+                <span style={{ background: cfg.color }} />
+                <span style={{ background: cfg.color }} />
+                <span style={{ background: cfg.color }} />
+              </span>
+            )}
+          </div>
+
+          {step.type === "start" && (
+            <div className="step-text">"{step.task}"</div>
           )}
-          {isActive && (
-            <span className="thinking-dots">
-              <span style={{ background: cfg.color }} />
-              <span style={{ background: cfg.color }} />
-              <span style={{ background: cfg.color }} />
-            </span>
+
+          {step.type === "code_written" && (
+            <div>
+              <div className="code-meta">
+                <span>{step.language || "python"}</span>
+                <span>{step.code?.split("\n").length} lines</span>
+              </div>
+              <pre
+                className="code-block"
+                dangerouslySetInnerHTML={{ __html: highlight(step.code || "") }}
+              />
+            </div>
+          )}
+
+          {step.type === "execution_result" && (
+            <pre className={`output-block ${step.success ? "output-ok" : "output-err"}`}>
+              {step.stdout || "(no output)"}
+            </pre>
+          )}
+
+          {step.type === "complete" && (
+            <div>
+              <div className="complete-box">
+                <p>{step.message?.replace("TASK COMPLETE:", "").trim()}</p>
+              </div>
+              {step.final_code && (
+                <details>
+                  <summary className="detail-toggle">
+                    Final code
+                  </summary>
+                  <pre
+                    className="code-block"
+                    dangerouslySetInnerHTML={{
+                      __html: highlight(step.final_code || ""),
+                    }}
+                  />
+                </details>
+              )}
+              <div className="step-meta">
+                {step.iterations} iteration{step.iterations !== 1 ? "s" : ""}
+              </div>
+            </div>
+          )}
+
+          {(step.type === "error" || step.type === "timeout") && (
+            <div className="error-msg">
+              {step.message || "Execution timed out"}
+            </div>
           )}
         </div>
-
-        {step.type === "start" && (
-          <div className="step-text">"{step.task}"</div>
-        )}
-
-        {step.type === "code_written" && (
-          <div>
-            <div className="code-meta">
-              <span>python</span>
-              <span>{step.code?.split("\n").length} lines</span>
-            </div>
-            <pre
-              className="code-block"
-              dangerouslySetInnerHTML={{ __html: highlight(step.code || "") }}
-            />
-          </div>
-        )}
-
-        {step.type === "execution_result" && (
-          <pre className={`output-block ${step.success ? "output-ok" : "output-err"}`}>
-            {step.stdout || "(no output)"}
-          </pre>
-        )}
-
-        {step.type === "complete" && (
-          <div>
-            <div className="complete-box">
-              <p>{step.message?.replace("TASK COMPLETE:", "").trim()}</p>
-            </div>
-            {step.final_code && (
-              <details>
-                <summary className="detail-toggle">
-                  Final code
-                </summary>
-                <pre
-                  className="code-block"
-                  dangerouslySetInnerHTML={{
-                    __html: highlight(step.final_code || ""),
-                  }}
-                />
-              </details>
-            )}
-            <div className="step-meta">
-              {step.iterations} iteration{step.iterations !== 1 ? "s" : ""}
-            </div>
-          </div>
-        )}
-
-        {(step.type === "error" || step.type === "timeout") && (
-          <div className="error-msg">
-            {step.message || "Execution timed out"}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -173,24 +175,39 @@ export default function App() {
     const t = task.trim();
     if (!t || running) return;
 
-    const id = Date.now().toString();
-    const s = { id, task: t, steps: [] };
-    setSessions((prev) => [s, ...prev]);
-    setActiveId(id);
     setTask("");
     setRunning(true);
+
+    let id = activeId;
+    let currentHistory = [];
+
+    if (id && active) {
+      currentHistory = active.history || [];
+    } else {
+      id = Date.now().toString();
+      const s = { id, task: t, steps: [], history: [] };
+      setSessions((prev) => [s, ...prev]);
+      setActiveId(id);
+    }
 
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
-    ws.onopen = () => ws.send(JSON.stringify({ task: t }));
+    ws.onopen = () => ws.send(JSON.stringify({ task: t, history: currentHistory }));
 
     ws.onmessage = (e) => {
       const step = JSON.parse(e.data);
       setSessions((prev) =>
-        prev.map((x) =>
-          x.id === id ? { ...x, steps: [...x.steps, step] } : x
-        )
+        prev.map((x) => {
+          if (x.id === id) {
+            const updated = { ...x, steps: [...x.steps, step] };
+            if (step.history) {
+              updated.history = step.history;
+            }
+            return updated;
+          }
+          return x;
+        })
       );
       if (["complete", "timeout", "error"].includes(step.type)) {
         setRunning(false);
@@ -242,15 +259,32 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-head">
           <div className="logo">
-            meridian
-            <span
-              className="logo-dot"
-              style={{ background: statusColor }}
+            <div 
+              className={`agent-avatar ${running ? "pulsing" : ""}`} 
+              style={{ borderColor: statusColor }}
             />
+            Meridian
           </div>
         </div>
 
-        <div className="sidebar-label">Sessions</div>
+        <div className="sidebar-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Sessions</span>
+          <button 
+            onClick={() => setActiveId(null)}
+            title="Start a new chat"
+            style={{ 
+              background: 'transparent', 
+              border: '1px solid var(--border)', 
+              color: 'var(--text-mute)', 
+              borderRadius: '4px', 
+              padding: '2px 8px', 
+              fontSize: '12px',
+              cursor: 'pointer'
+            }}
+          >
+            + New
+          </button>
+        </div>
 
         <div className="sidebar-list">
           {sessions.length === 0 ? (
